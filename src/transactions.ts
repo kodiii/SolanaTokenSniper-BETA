@@ -106,8 +106,10 @@ export async function fetchTransactionDetails(signature: string): Promise<MintsD
       console.log("Successfully fetched transaction details!");
       console.log(`SOL Token Account: ${solTokenAccount}`);
       console.log(`New Token Account: ${newTokenAccount}`);
-      console.log(`Track Token: https://photon-sol.tinyastro.io/en/lp/${newTokenAccount}`);
 
+      console.log(`\x1b[32mPHOTON TRACKER: https://photon-sol.tinyastro.io/en/lp/${newTokenAccount}\x1b[0m`);
+      
+      console.log(`\x1b[94mDEXSCREENER TRACKER: https://photon-sol.tinyastro.io/en/lp/${newTokenAccount}\x1b[0m`);
       const displayData: MintsDataReponse = {
         tokenMint: newTokenAccount,
         solMint: solTokenAccount,
