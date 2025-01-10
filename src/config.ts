@@ -1,4 +1,26 @@
 export const config = {
+  performance: {
+    max_concurrent_operations: 5, // Maximum number of concurrent operations
+    use_websocket: true, // Use WebSocket instead of HTTP polling
+    cache_enabled: true,
+    cache_duration: 60000, // Cache duration in milliseconds (1 minute)
+    batch_size: 10, // Number of operations to batch together
+    memory_cleanup_interval: 300000, // Memory cleanup interval in milliseconds (5 minutes)
+  },
+  rpc: {
+    endpoints: [
+      process.env.HELIUS_HTTPS_URI || "https://api.mainnet-beta.solana.com", // Primary endpoint from .env or default
+      "https://solana-api.projectserum.com", // Backup endpoint
+    ],
+    connection_timeout: 30000, // Connection timeout in milliseconds
+    max_retries: 3, // Maximum number of connection retries
+    load_balance: true, // Enable RPC endpoint load balancing
+    websocketEndpoint: process.env.HELIUS_WSS_URI,
+    priorityEndpoints: [
+      process.env.HELIUS_HTTPS_URI || "https://api.mainnet-beta.solana.com",
+      "https://solana-api.projectserum.com",
+    ],
+  },
   liquidity_pool: {
     radiyum_program_id: "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8",
     wsol_pc_mint: "So11111111111111111111111111111111111111112",
@@ -50,12 +72,12 @@ export const config = {
     max_alowed_pct_topholders: 10, // Max allowed percentage an individual topholder might hold
     exclude_lp_from_topholders: true, // If true, Liquidity Pools will not be seen as top holders
     // Warning
-    min_total_markets: 1,
+    min_total_markets: 0,
     min_total_lp_providers: 0,
     min_total_market_Liquidity: 5000, // Default is 1.000.000
     // Misc
     ignore_pump_fun: false,
-    max_score: 300, // Set to 0 to ignore
+    max_score: 9000, // Set to 0 to ignore
     legacy_not_allowed: [
       //"Low Liquidity",
       "Single holder ownership",
