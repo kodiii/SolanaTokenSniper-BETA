@@ -6,19 +6,99 @@ import { open } from "sqlite";
 import { createTableHoldings, removeHolding } from "./db";
 import { HoldingRecord } from "../types";
 import { DateTime } from "luxon";
-import { createSellTransaction } from "../transactions";
+import { createSellTransaction, getNextConnection } from "../transactions";
 import { Connection, PublicKey, Keypair } from "@solana/web3.js";
 import { Wallet } from "@project-serum/anchor";
 import bs58 from "bs58";
+import WebSocket from 'ws';
+import LRU from 'lru-cache';
 
 // Load environment variables from the .env file
 dotenv.config();
 
+// Initialize price cache
+const priceCache = new LRU({
+  max: 500, // Maximum number of items
+  ttl: 30000, // Cache TTL: 30 seconds
+});
+
+// WebSocket connection for real-time price updates
+let priceWs: WebSocket | null = null;
+const prices: { [key: string]: number } = {};
+
+function initializePriceWebSocket() {
+  if (priceWs) return;
+
+  const wsUrl = process.env.JUP_WS_PRICE_URI || "wss://price-api.jup.ag/v4/ws";
+  priceWs = new WebSocket(wsUrl);
+
+  priceWs.on('open', () => {
+    console.log('Price WebSocket connected');
+  });
+
+  priceWs.on('message', (data: string) => {
+    try {
+      const priceData = JSON.parse(data);
+      if (priceData.price && priceData.id) {
+        prices[priceData.id] = priceData.price;
+        priceCache.set(priceData.id, priceData.price);
+      }
+    } catch (error) {
+      console.error('Error parsing WebSocket message:', error);
+    }
+  });
+
+  priceWs.on('close', () => {
+    console.log('Price WebSocket disconnected, reconnecting...');
+    priceWs = null;
+    setTimeout(initializePriceWebSocket, 5000);
+  });
+
+  priceWs.on('error', (error) => {
+    console.error('WebSocket error:', error);
+    priceWs?.close();
+  });
+}
+
+// Batch process token balance checks
+async function batchCheckTokenBalances(connection: Connection, wallet: PublicKey, tokens: string[]): Promise<Map<string, number>> {
+  const batchSize = config.performance.batch_size;
+  const balances = new Map<string, number>();
+  
+  for (let i = 0; i < tokens.length; i += batchSize) {
+    const batch = tokens.slice(i, i + batchSize);
+    const promises = batch.map(async (token) => {
+      try {
+        const accounts = await connection.getParsedTokenAccountsByOwner(wallet, {
+          mint: new PublicKey(token),
+        });
+        if (accounts.value.length > 0) {
+          const amount = accounts.value[0].account.data.parsed.info.tokenAmount.uiAmount;
+          return { token, amount: amount || 0 };
+        }
+        return { token, amount: 0 };
+      } catch (error) {
+        console.error(`Error checking balance for ${token}:`, error);
+        return { token, amount: 0 };
+      }
+    });
+    
+    const results = await Promise.all(promises);
+    results.forEach(({ token, amount }) => balances.set(token, amount));
+  }
+  
+  return balances;
+}
+
 async function main() {
+  // Initialize WebSocket connection
+  if (config.performance.use_websocket && !priceWs) {
+    initializePriceWebSocket();
+  }
+
   const priceUrl = process.env.JUP_HTTPS_PRICE_URI || "";
-  const rpcUrl = process.env.HELIUS_HTTPS_URI || "";
-  const connection = new Connection(rpcUrl);
   const myWallet = new Wallet(Keypair.fromSecretKey(bs58.decode(process.env.PRIV_KEY_WALLET || "")));
+  const connection = getNextConnection();
 
   // Connect to database and create if not exists
   const db = await open({
@@ -46,29 +126,15 @@ async function main() {
     // Get all our current holdings
     const holdings = await db.all("SELECT * FROM holdings");
     if (holdings.length !== 0) {
-      // Check all token balances first
-      for (const holding of holdings) {
-        try {
-          const tokenAccounts = await connection.getParsedTokenAccountsByOwner(myWallet.publicKey, {
-            mint: new PublicKey(holding.Token),
-          });
-
-          const hasToken = tokenAccounts.value.length > 0;
-          if (hasToken) {
-            const tokenAmount = tokenAccounts.value[0].account.data.parsed.info.tokenAmount;
-            if (!tokenAmount.uiAmount || tokenAmount.uiAmount <= 0) {
-              console.log(`⚠️ Token ${holding.Token} has zero balance - Already sold elsewhere. Removing from tracking.`);
-              await removeHolding(holding.Token);
-              continue;
-            }
-          } else {
-            console.log(`⚠️ Token ${holding.Token} not found in wallet - Already sold elsewhere. Removing from tracking.`);
-            await removeHolding(holding.Token);
-            continue;
-          }
-        } catch (error) {
-          console.log(`⚠️ Error checking token ${holding.Token} balance:`, error);
-          continue;
+      // Batch check all token balances
+      const tokens = holdings.map(h => h.Token);
+      const balances = await batchCheckTokenBalances(connection, myWallet.publicKey, tokens);
+      
+      // Process balance results
+      for (const [token, balance] of balances) {
+        if (balance <= 0) {
+          console.log(`⚠️ Token ${token} has zero balance - Already sold elsewhere. Removing from tracking.`);
+          await removeHolding(token);
         }
       }
 
@@ -80,21 +146,42 @@ async function main() {
 
       // @TODO, add more sources for current prices. Now our price is the current price based on the Jupiter Last Swap (sell/buy) price
 
-      // Get latest tokens Price
-      const solMint = config.liquidity_pool.wsol_pc_mint;
-      const priceResponse = await axios.get<any>(priceUrl, {
-        params: {
-          ids: tokenValues + "," + solMint,
-          showExtraInfo: true,
-        },
-        timeout: config.tx.get_timeout,
-      });
+      // Get prices from WebSocket or fallback to HTTP
+      let currentPrices: any = {};
+      if (config.performance.use_websocket && Object.keys(prices).length > 0) {
+        currentPrices = prices;
+      } else {
+        // Check cache first
+        const cachedPrices = tokenValues.split(',').map(token => ({
+          token,
+          price: priceCache.get(token)
+        })).filter(item => item.price !== undefined);
 
-      // Verify if we received the latest prices
-      const currentPrices = priceResponse.data.data;
-      if (!currentPrices) {
-        console.log("⛔ Latest price could not be fetched. Trying again...");
-        return;
+        if (cachedPrices.length === tokenValues.split(',').length) {
+          currentPrices = Object.fromEntries(cachedPrices.map(({token, price}) => [token, {extraInfo: {lastSwappedPrice: {lastJupiterSellPrice: price}}}]));
+        } else {
+          // Fallback to HTTP request
+          const solMint = config.liquidity_pool.wsol_pc_mint;
+          const priceResponse = await axios.get<any>(priceUrl, {
+            params: {
+              ids: tokenValues + "," + solMint,
+              showExtraInfo: true,
+            },
+            timeout: config.tx.get_timeout,
+          });
+
+          if (!priceResponse.data.data) {
+            console.log("⛔ Latest price could not be fetched. Trying again...");
+            return;
+          }
+          currentPrices = priceResponse.data.data;
+          
+          // Update cache with new prices
+          Object.entries(currentPrices).forEach(([token, data]: [string, any]) => {
+            const price = data.extraInfo?.lastSwappedPrice?.lastJupiterSellPrice;
+            if (price) priceCache.set(token, price);
+          });
+        }
       }
 
       // Loop trough all our current holdings
