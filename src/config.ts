@@ -52,10 +52,10 @@ export const config = {
     // Warning
     min_total_markets: 1,
     min_total_lp_providers: 0,
-    min_total_market_Liquidity: 100000, // Default is 1.000.000
+    min_total_market_Liquidity: 10000, // Default is 1.000.000
     // Misc
-    ignore_pump_fun: true,
-    max_score: 200, // Set to 0 to ignore
+    ignore_pump_fun: false,
+    max_score: 300, // Set to 0 to ignore
     legacy_not_allowed: [
       //"Low Liquidity",
       "Single holder ownership",

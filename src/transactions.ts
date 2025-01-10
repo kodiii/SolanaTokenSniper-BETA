@@ -323,7 +323,8 @@ export async function getRugCheckConfirmed(tokenMint: string): Promise<boolean> 
   if (!rugResponse.data) return false;
 
   if (config.rug_check.verbose_log && config.rug_check.verbose_log === true) {
-    console.log(rugResponse.data);
+    console.log("\n🔍 Full API Response Debug:");
+    console.log(JSON.stringify(rugResponse.data, null, 2));
   }
 
   // Extract information
@@ -363,6 +364,11 @@ export async function getRugCheckConfirmed(tokenMint: string): Promise<boolean> 
 
   let topHolders = tokenReport.topHolders;
   const marketsLength = tokenReport.markets ? tokenReport.markets.length : 0;
+  console.log('🔍 DEBUG Markets:', {
+    markets: tokenReport.markets,
+    marketsLength: marketsLength ?? 0,
+    minTotalMarkets: config.rug_check.min_total_markets
+  });
   const totalLPProviders = tokenReport.totalLPProviders;
   const totalMarketLiquidity = tokenReport.totalMarketLiquidity;
   const isRugged = tokenReport.rugged;
