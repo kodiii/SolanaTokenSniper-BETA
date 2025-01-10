@@ -4,8 +4,8 @@ export const config = {
     wsol_pc_mint: "So11111111111111111111111111111111111111112",
   },
   tx: {
-    fetch_tx_max_retries: 10,
-    fetch_tx_initial_delay: 3000, // Initial delay before fetching LP creation transaction details (3 seconds)
+    fetch_tx_max_retries: 5,
+    fetch_tx_initial_delay: 1000, // Initial delay before fetching LP creation transaction details (3 seconds)
     swap_tx_initial_delay: 500, // Initial delay before first buy (1 second)
     get_timeout: 10000, // Timeout for API requests
     concurrent_transactions: 1, // Number of simultaneous transactions
@@ -14,8 +14,8 @@ export const config = {
   swap: {
     verbose_log: false,
     prio_fee_max_lamports: 1000000, // 0.001 SOL
-    prio_level: "medium", // If you want to land transaction fast, set this to use `veryHigh`. You will pay on average higher priority fee.
-    amount: "25000000", //0.015 SOL
+    prio_level: "high", // If you want to land transaction fast, set this to use `veryHigh`. You will pay on average higher priority fee.
+    amount: "50000000", //0.015 SOL
     slippageBps: "200", // 2%
     db_name_tracker_holdings: "src/tracker/holdings.db", // Sqlite Database location
     token_not_tradable_400_error_retries: 5, // How many times should the bot try to get a quote if the token is not tradable yet
@@ -39,11 +39,11 @@ export const config = {
     allow_freeze_authority: false, // The freeze authority is the address that can freeze token transfers, effectively locking up funds. Strongly Advised to set to false
     allow_rugged: false,
     // Critical
-    allow_mutable: true,
+    allow_mutable: false,
     block_returning_token_names: true,
     block_returning_token_creators: true,
-    block_symbols: ["XXX"],
-    block_names: ["XXX"],
+    block_symbols: [""],
+    block_names: [""],
     only_contain_string: false, // Enable/disable string containment filter
     contain_string: ["AI", "GPT", "AGENT"], // Strings to match in token names (case insensitive)
     allow_insider_topholders: false, // Allow inseder accounts to be part of the topholders
@@ -52,7 +52,7 @@ export const config = {
     // Warning
     min_total_markets: 1,
     min_total_lp_providers: 0,
-    min_total_market_Liquidity: 10000, // Default is 1.000.000
+    min_total_market_Liquidity: 5000, // Default is 1.000.000
     // Misc
     ignore_pump_fun: false,
     max_score: 300, // Set to 0 to ignore

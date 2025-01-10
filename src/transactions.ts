@@ -106,6 +106,7 @@ export async function fetchTransactionDetails(signature: string): Promise<MintsD
       console.log("Successfully fetched transaction details!");
       console.log(`SOL Token Account: ${solTokenAccount}`);
       console.log(`New Token Account: ${newTokenAccount}`);
+      console.log(`Track Token: https://photon-sol.tinyastro.io/en/lp/${newTokenAccount}`);
 
       const displayData: MintsDataReponse = {
         tokenMint: newTokenAccount,
@@ -364,11 +365,6 @@ export async function getRugCheckConfirmed(tokenMint: string): Promise<boolean> 
 
   let topHolders = tokenReport.topHolders;
   const marketsLength = tokenReport.markets ? tokenReport.markets.length : 0;
-  console.log('🔍 DEBUG Markets:', {
-    markets: tokenReport.markets,
-    marketsLength: marketsLength ?? 0,
-    minTotalMarkets: config.rug_check.min_total_markets
-  });
   const totalLPProviders = tokenReport.totalLPProviders;
   const totalMarketLiquidity = tokenReport.totalMarketLiquidity;
   const isRugged = tokenReport.rugged;
@@ -473,7 +469,7 @@ export async function getRugCheckConfirmed(tokenMint: string): Promise<boolean> 
     },
     {
       check: rugScore > rugCheckConfig.max_score && rugCheckConfig.max_score !== 0,
-      message: "🚫 Rug score to high.",
+      message: `🚫 Rug score is ${rugScore} which is higher than the allowed maximum of ${rugCheckConfig.max_score}`,
     },
     {
       check: rugCheckConfig.legacy_not_allowed && rugRisks.some((risk) => rugCheckConfig.legacy_not_allowed.includes(risk.name)),
