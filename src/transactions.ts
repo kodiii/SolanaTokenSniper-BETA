@@ -525,15 +525,15 @@ export async function getRugCheckConfirmed(tokenMint: string): Promise<boolean> 
       },
       {
         check: totalLPProviders < rugCheckConfig.min_total_lp_providers,
-        message: "🚫 Not enough LP Providers.",
+        message: `🚫 Not enough LP Providers:  ${totalLPProviders}`,
       },
       {
         check: marketsLength < rugCheckConfig.min_total_markets,
-        message: "🚫 Not enough Markets.",
+        message: `🚫 Not enough Markets:  ${marketsLength}`,
       },
       {
         check: totalMarketLiquidity < rugCheckConfig.min_total_market_Liquidity,
-        message: "🚫 Not enough Market Liquidity.",
+        message: `🚫 Not enough Market Liquidity:  ${totalMarketLiquidity}`,
       },
       {
         check: !rugCheckConfig.allow_rugged && isRugged,
@@ -541,11 +541,11 @@ export async function getRugCheckConfirmed(tokenMint: string): Promise<boolean> 
       },
       {
         check: rugCheckConfig.block_symbols.includes(tokenReport.tokenMeta?.symbol || ""),
-        message: "🚫 Symbol is blocked",
+        message: `🚫 Symbol is blocked:  ${tokenReport.tokenMeta?.symbol}`,
       },
       {
         check: rugCheckConfig.block_names.includes(tokenReport.tokenMeta?.name || ""),
-        message: "🚫 Name is blocked",
+        message: `🚫 Name is blocked:  ${tokenReport.tokenMeta?.name}`,
       },
       {
         check: rugCheckConfig.only_contain_string && (() => {

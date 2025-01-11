@@ -74,9 +74,7 @@ async function processTransaction(signature: string): Promise<void> {
   // Ouput logs
   console.log("Token found");
   console.log("👽 GMGN: https://gmgn.ai/sol/token/" + data.tokenMint);
-  console.log("😈 BullX: https://neo.bullx.io/terminal?chainId=1399811149&address=" + data.tokenMint);
-  console.log("😈 Photon: https://photon-sol.tinyastro.io/en/lp/" + data.tokenMint);
-  
+  console.log("😈 BullX: https://neo.bullx.io/terminal?chainId=1399811149&address=" + data.tokenMint);  
   // Check if simulation mode is enabled
   if (config.rug_check.simulation_mode) {
     console.log("👀 Token not swapped. Simulation mode is enabled.");
