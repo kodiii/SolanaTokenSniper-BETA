@@ -36,8 +36,8 @@ export const config = {
   swap: {
     verbose_log: false,
     prio_fee_max_lamports: 1000000, // 0.001 SOL
-    prio_level: "high", // If you want to land transaction fast, set this to use `veryHigh`. You will pay on average higher priority fee.
-    amount: "50000000", //0.015 SOL
+    prio_level: "medium", // If you want to land transaction fast, set this to use `veryHigh`. You will pay on average higher priority fee.
+    amount: "150000000", //0.015 SOL
     slippageBps: "200", // 2%
     db_name_tracker_holdings: "src/tracker/holdings.db", // Sqlite Database location
     token_not_tradable_400_error_retries: 5, // How many times should the bot try to get a quote if the token is not tradable yet
@@ -48,13 +48,13 @@ export const config = {
     prio_level: "high", // If you want to land transaction fast, set this to use `veryHigh`. You will pay on average higher priority fee.
     slippageBps: "200", // 2%
     auto_sell: true, // If set to true, stop loss and take profit triggers automatically when set.
-    stop_loss_percent: 50,
-    take_profit_percent: 500,
+    stop_loss_percent: 20,
+    take_profit_percent: 250,
     track_public_wallet: "", // If set an additional log line will be shown with a link to track your wallet
   },
   rug_check: {
     verbose_log: false,
-    simulation_mode: true,
+    simulation_mode: false,
     // Dangerous
     allow_mint_authority: false, // The mint authority is the address that has permission to mint (create) new tokens. Strongly Advised to set to false.
     allow_not_initialized: false, // This indicates whether the token account is properly set up on the blockchain. Strongly Advised to set to false
@@ -77,7 +77,8 @@ export const config = {
     min_total_market_Liquidity: 30000, // Default is 1.000.000
     // Misc
     ignore_pump_fun: false,
-    max_score: 11400, // Set to 0 to ignore
+    max_score: 11400, // Set to 0 to ignore, 12600 is max
+    min_score: 0,
     legacy_not_allowed: [
       //"Low Liquidity",
       "Single holder ownership",
