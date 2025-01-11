@@ -54,7 +54,7 @@ export const config = {
   },
   rug_check: {
     verbose_log: false,
-    simulation_mode: false,
+    simulation_mode: true,
     // Dangerous
     allow_mint_authority: false, // The mint authority is the address that has permission to mint (create) new tokens. Strongly Advised to set to false.
     allow_not_initialized: false, // This indicates whether the token account is properly set up on the blockchain. Strongly Advised to set to false
