@@ -8,6 +8,7 @@ import { fetchTransactionDetails, createSwapTransaction, getRugCheckConfirmed, f
 dotenv.config();
 let activeTransactions = 0;
 const MAX_CONCURRENT = config.tx.concurrent_transactions;
+const pendingTransactions: string[] = [];
 
 // Function used to open our websocket connection
 function sendSubscribeRequest(ws: WebSocket): void {
@@ -39,69 +40,93 @@ function sendUnsubscribeRequest(ws: WebSocket): void {
 
 // Function used to handle the transaction once a new pool creation is found
 async function processTransaction(signature: string): Promise<void> {
-  // Output logs
-  console.log("=============================================");
-  console.log("🔎 New Liquidity Pool found.");
-  console.log("🔃 Fetching transaction details ...");
+  if (activeTransactions >= MAX_CONCURRENT) {
+    console.log("⏳ Max concurrent transactions reached, queuing...");
+    pendingTransactions.push(signature);
+    return;
+  }
 
-  // Fetch the transaction details
-  const data = await fetchTransactionDetails(signature);
-  if (!data) {
-    console.log("⛔ Transaction aborted. No data returned.");
+  try {
+    activeTransactions++;
+    
+    // Output logs
+    console.log("=============================================");
+    console.log("🔎 New Liquidity Pool found.");
+    console.log("🔃 Fetching transaction details ...");
+
+    // Fetch the transaction details
+    const data = await fetchTransactionDetails(signature);
+    if (!data) {
+      console.log("⛔ Transaction aborted. No data returned.");
+      console.log("🟢 Resuming looking for new tokens...\n");
+      return;
+    }
+
+    // Ensure required data is available
+    if (!data.solMint || !data.tokenMint) return;
+
+    // Check rug check
+    const isRugCheckPassed = await getRugCheckConfirmed(data.tokenMint);
+    if (!isRugCheckPassed) {
+      console.log("🚫 Rug Check not passed! Transaction aborted.");
+      console.log("🟢 Resuming looking for new tokens...\n");
+      return;
+    }
+
+    // Handle ignored tokens
+    if (data.tokenMint.trim().toLowerCase().endsWith("pump") && config.rug_check.ignore_pump_fun) {
+      // Check if ignored
+      console.log("🚫 Transaction skipped. Ignoring Pump.fun.");
+      console.log("🟢 Resuming looking for new tokens..\n");
+      return;
+    }
+
+    // Ouput logs
+    console.log("Token found");
+    console.log("👽 GMGN: https://gmgn.ai/sol/token/" + data.tokenMint);
+    console.log("😈 BullX: https://neo.bullx.io/terminal?chainId=1399811149&address=" + data.tokenMint);  
+    // Check if simulation mode is enabled
+    if (config.rug_check.simulation_mode) {
+      console.log("👀 Token not swapped. Simulation mode is enabled.");
+      console.log("🟢 Resuming looking for new tokens..\n");
+      return;
+    }
+
+    // Add initial delay before first buy
+    await new Promise((resolve) => setTimeout(resolve, config.tx.swap_tx_initial_delay));
+
+    // Create Swap transaction
+    const tx = await createSwapTransaction(data.solMint, data.tokenMint);
+    if (!tx) {
+      console.log("⛔ Transaction aborted. No valid id returned.");
+      console.log("🟢 Resuming looking for new tokens...\n");
+      return;
+    }
+
+    // Output logs
+    console.log("✅ Swap quote recieved.");
+    console.log("🚀 Swapping SOL for Token.");
+    console.log("Swap Transaction: ", "https://solscan.io/tx/" + tx);
+
+    // Fetch and store the transaction for tracking purposes
+    const saveConfirmation = await fetchAndSaveSwapDetails(tx);
+    if (!saveConfirmation) {
+      console.log("❌ Warning: Transaction not saved for tracking! Track Manually!");
+    }
+  } catch (error) {
+    console.error("Error processing transaction:", error);
+  } finally {
+    activeTransactions--;
+    
+    // Process next pending transaction if any
+    if (pendingTransactions.length > 0 && activeTransactions < MAX_CONCURRENT) {
+      const nextSignature = pendingTransactions.shift();
+      if (nextSignature) {
+        processTransaction(nextSignature).catch(console.error);
+      }
+    }
+    
     console.log("🟢 Resuming looking for new tokens...\n");
-    return;
-  }
-
-  // Ensure required data is available
-  if (!data.solMint || !data.tokenMint) return;
-
-  // Check rug check
-  const isRugCheckPassed = await getRugCheckConfirmed(data.tokenMint);
-  if (!isRugCheckPassed) {
-    console.log("🚫 Rug Check not passed! Transaction aborted.");
-    console.log("🟢 Resuming looking for new tokens...\n");
-    return;
-  }
-
-  // Handle ignored tokens
-  if (data.tokenMint.trim().toLowerCase().endsWith("pump") && config.rug_check.ignore_pump_fun) {
-    // Check if ignored
-    console.log("🚫 Transaction skipped. Ignoring Pump.fun.");
-    console.log("🟢 Resuming looking for new tokens..\n");
-    return;
-  }
-
-  // Ouput logs
-  console.log("Token found");
-  console.log("👽 GMGN: https://gmgn.ai/sol/token/" + data.tokenMint);
-  console.log("😈 BullX: https://neo.bullx.io/terminal?chainId=1399811149&address=" + data.tokenMint);  
-  // Check if simulation mode is enabled
-  if (config.rug_check.simulation_mode) {
-    console.log("👀 Token not swapped. Simulation mode is enabled.");
-    console.log("🟢 Resuming looking for new tokens..\n");
-    return;
-  }
-
-  // Add initial delay before first buy
-  await new Promise((resolve) => setTimeout(resolve, config.tx.swap_tx_initial_delay));
-
-  // Create Swap transaction
-  const tx = await createSwapTransaction(data.solMint, data.tokenMint);
-  if (!tx) {
-    console.log("⛔ Transaction aborted. No valid id returned.");
-    console.log("🟢 Resuming looking for new tokens...\n");
-    return;
-  }
-
-  // Output logs
-  console.log("✅ Swap quote recieved.");
-  console.log("🚀 Swapping SOL for Token.");
-  console.log("Swap Transaction: ", "https://solscan.io/tx/" + tx);
-
-  // Fetch and store the transaction for tracking purposes
-  const saveConfirmation = await fetchAndSaveSwapDetails(tx);
-  if (!saveConfirmation) {
-    console.log("❌ Warning: Transaction not saved for tracking! Track Manually!");
   }
 }
 
@@ -140,23 +165,8 @@ async function websocketHandler(): Promise<void> {
         const containsCreate = logs.some((log: string) => typeof log === "string" && log.includes("Program log: initialize2: InitializeInstruction2"));
         if (!containsCreate || typeof signature !== "string") return;
 
-        // Verify if we have reached the max concurrent transactions
-        if (activeTransactions >= MAX_CONCURRENT) {
-          console.log("⏳ Max concurrent transactions reached, skipping...");
-          return;
-        }
-
-        // Add additional concurrent transaction
-        activeTransactions++;
-
-        // Process transaction asynchronously
-        processTransaction(signature)
-          .catch((error) => {
-            console.error("Error processing transaction:", error);
-          })
-          .finally(() => {
-            activeTransactions--;
-          });
+        // Process transaction
+        processTransaction(signature).catch(console.error);
       }
     } catch (error) {
       console.error("Error parsing JSON or processing data:", error);
