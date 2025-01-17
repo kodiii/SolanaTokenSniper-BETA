@@ -90,6 +90,16 @@ export const config = {
     stop_loss_percent: 20, // Changed from 20 to 8 for better risk management
     take_profit_percent: 25, // Changed from 250 to 80 for more realistic profit targets
     track_public_wallet: "", // If set an additional log line will be shown with a link to track your wallet
+<<<<<<< Updated upstream
+=======
+    price_source: "jup", // "jup" for Jupiter or "dex" for DexScreener
+    min_holding_time: 300, // 5 minutes
+    min_liquidity: 10000, // $10,000
+    max_price_impact: 5, // 5%
+    max_retries: 3,
+    retry_delay: 5000, // 5 seconds
+    cooling_period: 30000, // 30 seconds
+>>>>>>> Stashed changes
   },
   rug_check: {
     verbose_log: false,
@@ -108,7 +118,12 @@ export const config = {
     only_contain_string: false, // Enable/disable string containment filter
     contain_string: ["AI", "GPT", "AGENT"], // Strings to match in token names (case insensitive)
     allow_insider_topholders: false, // Allow inseder accounts to be part of the topholders
+<<<<<<< Updated upstream
     max_alowed_pct_topholders: 10, // Max allowed percentage an individual topholder might hold
+=======
+    max_alowed_pct_topholders: 15, // Max allowed percentage an individual topholder might hold
+    max_alowed_pct_all_topholders: 40, // Max allowed totalpercentage all topholders in total might hold related to supply
+>>>>>>> Stashed changes
     exclude_lp_from_topholders: true, // If true, Liquidity Pools will not be seen as top holders
     // Warning
     min_total_markets: 0,

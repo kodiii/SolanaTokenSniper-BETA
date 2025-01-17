@@ -6,7 +6,11 @@ import { open } from "sqlite";
 import { createTableHoldings, removeHolding } from "./db";
 import { HoldingRecord } from "../types";
 import { DateTime } from "luxon";
+<<<<<<< Updated upstream
 import { createSellTransaction } from "../transactions";
+=======
+import { createSellTransaction, getNextConnection, withRetry } from "../transactions";
+>>>>>>> Stashed changes
 import { Connection, PublicKey, Keypair } from "@solana/web3.js";
 import { Wallet } from "@project-serum/anchor";
 import bs58 from "bs58";
@@ -210,10 +214,22 @@ async function main() {
           const priceData = priceCache.get(token);
           const tokenCurrentPrice = priceData?.price ?? tokenPerTokenPaidUSDC;
 
+<<<<<<< Updated upstream
           // Calculate PnL and profit/loss
           const unrealizedPnLUSDC = (tokenCurrentPrice - tokenPerTokenPaidUSDC) * tokenBalance - tokenSolFeePaidUSDC;
           const unrealizedPnLPercentage = (unrealizedPnLUSDC / (tokenPerTokenPaidUSDC * tokenBalance)) * 100;
           const iconPnl = unrealizedPnLUSDC > 0 ? "🟢" : "🔴";
+=======
+      // Get cached prices with validation
+      const cachedPrices = tokenValues.split(',').map(token => {
+        const price = priceCache.get(token);
+        if (!price || price <= 0) {
+          priceCache.delete(token); // Remove invalid cached prices
+          return null;
+        }
+        return { token, price };
+      }).filter(item => item !== null);
+>>>>>>> Stashed changes
 
           // Track analytics
           const currentSlot = await connection.getSlot();
@@ -283,6 +299,7 @@ async function main() {
                 }
               }
 
+<<<<<<< Updated upstream
               if (unrealizedPnLPercentage >= takeProfitThreshold || unrealizedPnLPercentage <= stopLossThreshold) {
                 const tx = await createSellTransaction(config.liquidity_pool.wsol_pc_mint, token, amountIn);
                 if (!tx) {
@@ -294,7 +311,94 @@ async function main() {
                     "Took Profit: " + tx : 
                     "Stop Loss triggered: " + tx;
                 }
+=======
+            currentPrices = priceResponse.data.data;
+            console.log('Received prices:', currentPrices);
+            
+            // Update cache with new prices
+            Object.entries(currentPrices).forEach(([token, data]: [string, any]) => {
+              const price = data.extraInfo?.lastSwappedPrice?.lastJupiterSellPrice;
+              if (price) priceCache.set(token, price);
+            });
+          }
+        } catch (error: unknown) {
+          const errorMessage = error instanceof AxiosError ? error.message : 'Unknown error occurred';
+          console.log("⛔ Error fetching prices:", errorMessage);
+          currentPrices = Object.fromEntries(tokens.map(token => [token, {extraInfo: {lastSwappedPrice: {lastJupiterSellPrice: 0}}}]));
+        }
+      }
+
+      // Loop through all our current holdings
+      const holdingLogs: string[] = [];
+      for (const row of updatedHoldings) {
+        const holding: HoldingRecord = row;
+        const {
+          Token: token,
+          TokenName,
+          Time: tokenTime,
+          Balance: tokenBalance,
+          SolPaidUSDC: tokenSolPaidUSDC,
+          SolFeePaidUSDC: tokenSolFeePaidUSDC,
+          PerTokenPaidUSDC: tokenPerTokenPaidUSDC
+        } = holding;
+        const tokenName = TokenName === "N/A" ? token : TokenName;
+
+        // Convert Trade Time
+        const centralEuropenTime = DateTime.fromMillis(tokenTime).toLocal();
+        const hrTradeTime = centralEuropenTime.toFormat("HH:mm:ss");
+
+        // Get current price with error handling
+        let tokenCurrentPrice = 0;
+        let priceFetchError = false;
+        
+        try {
+          const price = currentPrices[token]?.extraInfo?.lastSwappedPrice?.lastJupiterSellPrice;
+          if (!price || price <= 0) {
+            throw new Error('Invalid price returned');
+          }
+          tokenCurrentPrice = price;
+        } catch (error: unknown) {
+          priceFetchError = true;
+          const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+          saveLogTo(actionsLogs, `⛔ Failed to fetch price for ${tokenName}: ${errorMessage}`);
+          continue; // Skip this token if price fetch fails
+        }
+
+        // Calculate PnL and profit/loss
+        const unrealizedPnLUSDC = (tokenCurrentPrice - tokenPerTokenPaidUSDC) * tokenBalance - tokenSolFeePaidUSDC;
+        const unrealizedPnLPercentage = (unrealizedPnLUSDC / (tokenPerTokenPaidUSDC * tokenBalance)) * 100;
+        
+        // Log price and PnL for debugging
+        saveLogTo(actionsLogs, `💰 ${tokenName} Price: $${tokenCurrentPrice.toFixed(4)} | PnL: $${unrealizedPnLUSDC.toFixed(2)} (${unrealizedPnLPercentage.toFixed(2)}%)`);
+        const iconPnl = unrealizedPnLUSDC > 0 ? "🟢" : "🔴";
+
+        // Check SL/TP
+        let sltpMessage = "";
+        let shouldLog = true;
+
+        if (config.sell.auto_sell && config.sell.auto_sell === true) {
+          const amountIn = tokenBalance.toString().replace(".", "");
+          if (unrealizedPnLPercentage >= config.sell.take_profit_percent || unrealizedPnLPercentage <= -config.sell.stop_loss_percent) {
+            try {
+              const tx = await withRetry(async () => {
+                const result = await createSellTransaction(config.liquidity_pool.wsol_pc_mint, token, amountIn);
+                if (!result) {
+                  throw new Error('Failed to create sell transaction');
+                }
+                return result;
+              }, 3, 1000); // Retry 3 times with 1 second delay
+              
+              if (tx === "TOKEN_ALREADY_SOLD") {
+                shouldLog = false; // Don't include this token in logs
+              } else {
+                sltpMessage = unrealizedPnLPercentage >= config.sell.take_profit_percent ?
+                  "Took Profit: " + tx :
+                  "Stop Loss triggered: " + tx;
+>>>>>>> Stashed changes
               }
+            } catch (error) {
+              console.error('Error selling token:', error);
+              sltpMessage = "⛔ Could not sell. Trying again in 5 seconds.";
             }
           }
 

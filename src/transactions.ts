@@ -1,6 +1,8 @@
 import axios from "axios";
 import { Connection, Keypair, VersionedTransaction, PublicKey, Commitment } from "@solana/web3.js";
 import { Wallet } from "@project-serum/anchor";
+import { open } from "sqlite";
+import sqlite3 from "sqlite3";
 import bs58 from "bs58";
 import dotenv from "dotenv";
 import { config } from "./config";
@@ -25,7 +27,7 @@ async function batchProcess<T>(
 }
 
 // Exponential backoff retry
-async function withRetry<T>(operation: () => Promise<T>, maxRetries: number, initialDelay: number): Promise<T> {
+export async function withRetry<T>(operation: () => Promise<T>, maxRetries: number, initialDelay: number): Promise<T> {
   let retryCount = 0;
   while (true) {
     try {
@@ -48,6 +50,8 @@ import {
   HoldingRecord,
   RugResponseExtended,
   NewTokenRecord,
+  MarketData,
+  SellTransactionLock
 } from "./types";
 import { insertHolding, insertNewToken, removeHolding, selectTokenByMint, selectTokenByNameAndCreator } from "./tracker/db";
 
@@ -377,6 +381,7 @@ export async function fetchAndSaveSwapDetails(tx: string): Promise<boolean> {
   }
 }
 
+<<<<<<< Updated upstream
 export async function createSellTransaction(solMint: string, tokenMint: string, amount: string): Promise<string | null> {
   const quoteUrl = process.env.JUP_HTTPS_QUOTE_URI || "";
   const swapUrl = process.env.JUP_HTTPS_SWAP_URI || "";
@@ -472,17 +477,172 @@ export async function createSellTransaction(solMint: string, tokenMint: string, 
       }
     }, config.tx.fetch_tx_max_retries, config.tx.retry_delay);
   });
+=======
+async function getMarketData(tokenMint: string): Promise<MarketData> {
+  const priceUrl = process.env.JUP_HTTPS_PRICE_URI || "";
+  const dexPriceUrl = process.env.DEX_HTTPS_LATEST_TOKENS || "";
+  
+  try {
+    // Try Jupiter first
+    const priceResponse = await axios.get<any>(priceUrl, {
+      params: { ids: tokenMint },
+      timeout: config.tx.get_timeout,
+    });
+
+    if (priceResponse.data?.data?.[tokenMint]) {
+      const jupData = priceResponse.data.data[tokenMint];
+      return {
+        price: jupData.price,
+        liquidity: jupData.liquidity?.usd || 0,
+        priceImpact: 0, // Will calculate below
+        lastUpdated: Date.now(),
+        source: 'jup'
+      };
+    }
+
+    // Fallback to DexScreener
+    const dexResponse = await axios.get<any>(`${dexPriceUrl}${tokenMint}`, {
+      timeout: config.tx.get_timeout,
+    });
+
+    if (dexResponse.data?.pairs?.length > 0) {
+      const pair = dexResponse.data.pairs[0];
+      return {
+        price: parseFloat(pair.priceUsd),
+        liquidity: pair.liquidity?.usd || 0,
+        priceImpact: 0, // Will calculate below
+        lastUpdated: Date.now(),
+        source: 'dex'
+      };
+    }
+
+    throw new Error('No market data available');
+  } catch (error) {
+    console.error('Error fetching market data:', error);
+    throw error;
+  }
+>>>>>>> Stashed changes
 }
 
-export async function getRugCheckConfirmed(tokenMint: string): Promise<boolean> {
+// Database initialization
+import { Database } from 'sqlite';
+let db: Database;
+
+async function initializeDatabase() {
+  try {
+    db = await open({
+      filename: config.swap.db_name_tracker_holdings,
+      driver: sqlite3.Database
+    });
+    console.log('Database initialized successfully');
+  } catch (error) {
+    console.error('Failed to initialize database:', error);
+    process.exit(1);
+  }
+}
+
+// Initialize database before any operations
+initializeDatabase();
+
+const transactionLocks = new Map<string, SellTransactionLock>();
+
+export async function createSellTransaction(solMint: string, tokenMint: string, amount: string): Promise<string | null> {
+  // Initialize database if needed
+  if (!db) {
+    try {
+      await initializeDatabase();
+    } catch (error) {
+      console.error('Failed to initialize database:', error);
+      return null;
+    }
+  }
+
   return withRetry(async () => {
-    const rugResponse = await axios.get<RugResponseExtended>(
-      `https://api.rugcheck.xyz/v1/tokens/${tokenMint}/report`,
-      { timeout: config.tx.get_timeout }
+    // Check if transaction is locked
+    const lock = transactionLocks.get(tokenMint);
+    if (lock && lock.expiresAt > Date.now()) {
+      console.log(`⏳ Transaction locked for ${tokenMint}. Expires in ${Math.ceil((lock.expiresAt - Date.now()) / 1000)} seconds`);
+      return null;
+    }
+
+    // Create new lock
+    transactionLocks.set(tokenMint, {
+      token: tokenMint,
+      lockedAt: Date.now(),
+      expiresAt: Date.now() + config.sell.cooling_period,
+      attempts: 0
+    });
+
+    // Check minimum holding time
+    const holding = await db.get<HoldingRecord>("SELECT * FROM holdings WHERE Token = ?", [tokenMint]);
+    if (holding) {
+      const holdingTime = Date.now() - holding.Time;
+      if (holdingTime < config.sell.min_holding_time * 1000) {
+        console.log(`⏳ Token ${tokenMint} needs to be held for ${config.sell.min_holding_time - Math.floor(holdingTime/1000)} more seconds`);
+        return null;
+      }
+    }
+
+    const quoteUrl = process.env.JUP_HTTPS_QUOTE_URI || "";
+    const swapUrl = process.env.JUP_HTTPS_SWAP_URI || "";
+    const myWallet = new Wallet(Keypair.fromSecretKey(bs58.decode(process.env.PRIV_KEY_WALLET || "")));
+    const connection = getNextConnection();
+
+    // Check token balance
+    const tokenAccounts = await connection.getParsedTokenAccountsByOwner(myWallet.publicKey, {
+      mint: new PublicKey(tokenMint),
+    });
+
+    if (!tokenAccounts.value.length) {
+      console.log(`⚠️ Token ${tokenMint} not found in wallet - Already sold elsewhere.`);
+      await removeHolding(tokenMint);
+      return "TOKEN_ALREADY_SOLD";
+    }
+
+    const tokenAmount = tokenAccounts.value[0].account.data.parsed.info.tokenAmount;
+    if (!tokenAmount.uiAmount || tokenAmount.uiAmount <= 0) {
+      console.log(`⚠️ Token ${tokenMint} has zero balance - Already sold elsewhere.`);
+      await removeHolding(tokenMint);
+      return "TOKEN_ALREADY_SOLD";
+    }
+
+    // Get quote
+    const quoteResponse = await axios.get<QuoteResponse>(quoteUrl, {
+      params: {
+        inputMint: tokenMint,
+        outputMint: solMint,
+        amount: amount,
+        slippageBps: config.sell.slippageBps,
+      },
+      timeout: config.tx.get_timeout,
+    });
+
+    if (!quoteResponse.data) return null;
+
+    // Create swap transaction
+    const swapTransaction = await axios.post<SerializedQuoteResponse>(
+      swapUrl,
+      JSON.stringify({
+        quoteResponse: quoteResponse.data,
+        userPublicKey: myWallet.publicKey.toString(),
+        wrapAndUnwrapSol: true,
+        dynamicSlippage: { maxBps: 300 },
+        prioritizationFeeLamports: {
+          priorityLevelWithMaxLamports: {
+            maxLamports: config.sell.prio_fee_max_lamports,
+            priorityLevel: config.sell.prio_level,
+          },
+        },
+      }),
+      {
+        headers: { "Content-Type": "application/json" },
+        timeout: config.tx.get_timeout,
+      }
     );
 
-    if (!rugResponse.data) return false;
+    if (!swapTransaction.data) return null;
 
+<<<<<<< Updated upstream
     if (config.rug_check.verbose_log) {
       console.log("\nVerbose log:");
       console.log(rugResponse.data);
@@ -514,15 +674,24 @@ export async function getRugCheckConfirmed(tokenMint: string): Promise<boolean> 
     
     rugRisks.forEach((risk) => {
       console.log(`- ${risk.name}: ${risk.value}`);
+=======
+    // Process transaction
+    const swapTransactionBuf = Buffer.from(swapTransaction.data.swapTransaction, "base64");
+    const transaction = VersionedTransaction.deserialize(swapTransactionBuf);
+    transaction.sign([myWallet.payer]);
+
+    // Execute transaction
+    const latestBlockHash = await connection.getLatestBlockhash();
+    const rawTransaction = transaction.serialize();
+    const txid = await connection.sendRawTransaction(rawTransaction, {
+      skipPreflight: true,
+      maxRetries: 2,
+>>>>>>> Stashed changes
     });
 
-    let topHolders = tokenReport.topHolders;
-    const marketsLength = tokenReport.markets?.length || 0;
-    const totalLPProviders = tokenReport.totalLPProviders;
-    const totalMarketLiquidity = tokenReport.totalMarketLiquidity;
-    const isRugged = tokenReport.rugged;
-    const rugScore = tokenReport.score;
+    if (!txid) return null;
 
+<<<<<<< Updated upstream
     if (config.rug_check.exclude_lp_from_topholders && tokenReport.markets) {
       const liquidityAddresses = tokenReport.markets
         .flatMap(market => [market.liquidityA, market.liquidityB])
@@ -687,5 +856,21 @@ export async function getRugCheckConfirmed(tokenMint: string): Promise<boolean> 
 
     console.log("\nAll Rug Check conditions passed!");
     return true;
+=======
+    // Confirm transaction
+    const conf = await connection.confirmTransaction({
+      blockhash: latestBlockHash.blockhash,
+      lastValidBlockHeight: latestBlockHash.lastValidBlockHeight,
+      signature: txid,
+    });
+
+    if (conf.value.err) return null;
+
+    // Remove holding on successful sale
+    await removeHolding(tokenMint);
+    return txid;
+>>>>>>> Stashed changes
   }, config.tx.fetch_tx_max_retries, config.tx.retry_delay);
 }
+
+export { getRugCheckConfirmed } from './rugcheck';

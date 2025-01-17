@@ -282,5 +282,111 @@ export interface NewTokenRecord {
   mint: string;
   creator: string;
 }
+<<<<<<< Updated upstream
 // Update to reflect an array of transactions
+=======
+
+export interface createSellTransactionResponse {
+  success: boolean;
+  msg: string | null;
+  tx: string | null;
+}
+
+export interface SellTransactionLock {
+  token: string;
+  lockedAt: number;
+  expiresAt: number;
+  attempts: number;
+}
+
+export interface SellTransactionLock {
+  token: string;
+  lockedAt: number;
+  expiresAt: number;
+  attempts: number;
+}
+
+export interface MarketData {
+  price: number;
+  liquidity: number;
+  priceImpact: number;
+  lastUpdated: number;
+  source: 'jup' | 'dex';
+}
+
+export interface SellAttempt {
+  token: string;
+  timestamp: number;
+  success: boolean;
+  error?: string;
+  price?: number;
+  liquidity?: number;
+  priceImpact?: number;
+}
+
+export interface TransactionSafetyChecks {
+  minHoldingTime: number; // in seconds
+  minLiquidity: number; // in USD
+  maxPriceImpact: number; // in percentage (0-100)
+  maxRetries: number;
+  retryDelay: number; // in milliseconds
+}
+
+export interface LastPriceDexReponse {
+  schemaVersion: string;
+  pairs: {
+    chainId: string;
+    dexId: string;
+    url: string;
+    pairAddress: string;
+    labels?: string[];
+    baseToken: {
+      address: string;
+      name: string;
+      symbol: string;
+    };
+    quoteToken: {
+      address: string;
+      name: string;
+      symbol: string;
+    };
+    priceNative: string;
+    priceUsd: string;
+    txns: {
+      m5: { buys: number; sells: number };
+      h1: { buys: number; sells: number };
+      h6: { buys: number; sells: number };
+      h24: { buys: number; sells: number };
+    };
+    volume: {
+      h24: number;
+      h6: number;
+      h1: number;
+      m5: number;
+    };
+    priceChange: {
+      m5: number;
+      h1: number;
+      h6: number;
+      h24: number;
+    };
+    liquidity: {
+      usd: number;
+      base: number;
+      quote: number;
+    };
+    fdv: number;
+    marketCap: number;
+    pairCreatedAt: number;
+    info: {
+      imageUrl: string;
+      header: string;
+      openGraph: string;
+      websites?: { label: string; url: string }[];
+      socials: { type: string; url: string }[];
+    };
+  }[];
+}
+
+>>>>>>> Stashed changes
 export type TransactionDetailsResponseArray = TransactionDetailsResponse[];
