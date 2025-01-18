@@ -139,6 +139,10 @@ export class DynamicPriceCache {
     return this.history.get(token);
   }
 
+  public invalidate(token: string): void {
+    this.cache.delete(token);
+  }
+
   public clear(): void {
     this.cache.clear();
     this.history.clear();

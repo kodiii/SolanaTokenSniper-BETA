@@ -61,6 +61,7 @@ const developmentConfig: Partial<typeof baseConfig> = {
     contain_string: [],
     allow_insider_topholders: true,
     max_alowed_pct_topholders: 20,
+    max_alowed_pct_all_topholders: 50,
     exclude_lp_from_topholders: false,
     min_total_markets: 0,
     min_total_lp_providers: 0,

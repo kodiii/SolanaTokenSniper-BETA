@@ -2,19 +2,41 @@ import { TokenReport } from './types';
 import { RugCheckCondition } from './types';
 import { config } from '../config';
 
-export function logTokenMetadata(tokenReport: TokenReport) {
-  if (config.rug_check.verbose_log) {
-    console.log("\n🔍 Token Metadata Debug:");
-    console.log("- Token Name:", tokenReport.tokenMeta?.name || "undefined");
-    console.log("- Token Symbol:", tokenReport.tokenMeta?.symbol || "undefined");
-    console.log("- Token Creator:", tokenReport.creator);
-    console.log("- Raw tokenMeta:", JSON.stringify(tokenReport.tokenMeta, null, 2));
-    console.log("- fileMeta:", JSON.stringify(tokenReport.fileMeta, null, 2));
+export interface Logger {
+  error(message: string): void;
+  info(message: string): void;
+  debug(message: string): void;
+}
+
+export class RugCheckLogger implements Logger {
+  error(message: string): void {
+    console.error(message);
+  }
+
+  info(message: string): void {
+    console.log(message);
+  }
+
+  debug(message: string): void {
+    if (config.rug_check.verbose_log) {
+      console.log(message);
+    }
   }
 }
 
+export function logTokenMetadata(tokenReport: TokenReport) {
+  const logger = new RugCheckLogger();
+  logger.debug("\n🔍 Token Metadata Debug:");
+  logger.debug(`- Token Name: ${tokenReport.tokenMeta?.name || "undefined"}`);
+  logger.debug(`- Token Symbol: ${tokenReport.tokenMeta?.symbol || "undefined"}`);
+  logger.debug(`- Token Creator: ${tokenReport.creator}`);
+  logger.debug(`- Raw tokenMeta: ${JSON.stringify(tokenReport.tokenMeta, null, 2)}`);
+  logger.debug(`- fileMeta: ${JSON.stringify(tokenReport.fileMeta, null, 2)}`);
+}
+
 export function logTokenRisks(tokenReport: TokenReport) {
-  console.log("\n🔍 Token Risks:");
+  const logger = new RugCheckLogger();
+  logger.info("\n🔍 Token Risks:");
   const rugRisks = tokenReport.risks || [{
     name: "Good",
     value: "",
@@ -24,12 +46,13 @@ export function logTokenRisks(tokenReport: TokenReport) {
   }];
   
   rugRisks.forEach((risk) => {
-    console.log(`- ${risk.name}: ${risk.value}`);
+    logger.info(`- ${risk.name}: ${risk.value}`);
   });
 }
 
 export function logConditionResults(conditions: RugCheckCondition[]): boolean {
-  console.log("\n🔍 Rug Check Conditions:");
+  const logger = new RugCheckLogger();
+  logger.info("\n🔍 Rug Check Conditions:");
   let hasFailedConditions = false;
 
   for (const condition of conditions) {
@@ -49,7 +72,7 @@ export function logConditionResults(conditions: RugCheckCondition[]): boolean {
     }
     
     const status = isConditionFailed ? "❌ FAILED" : "✅ PASSED";
-    console.log(`${status}: ${displayMessage}`);
+    logger.info(`${status}: ${displayMessage}`);
     
     if (isConditionFailed) {
       hasFailedConditions = true;
@@ -57,9 +80,9 @@ export function logConditionResults(conditions: RugCheckCondition[]): boolean {
   }
 
   if (hasFailedConditions) {
-    console.log("\n❌ Rug Check Failed: One or more conditions did not pass");
+    logger.error("\n❌ Rug Check Failed: One or more conditions did not pass");
   } else {
-    console.log("\n✅ All Rug Check conditions passed!");
+    logger.info("\n✅ All Rug Check conditions passed!");
   }
 
   return !hasFailedConditions;

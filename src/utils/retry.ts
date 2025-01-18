@@ -1,15 +1,40 @@
 import { config } from '../config';
+import { sleep } from './sleep';
 
 export interface RetryOptions {
-  maxAttempts: number;
-  initialDelay: number;
-  maxDelay: number;
-  backoffFactor: number;
-  timeout: number;
+  maxRetries?: number;
+  delayMs?: number;
+  backoff?: 'exponential' | 'linear' | 'none';
   retryableErrors?: RegExp[];
   onRetry?: (error: Error, attempt: number) => void;
   shouldRetry?: (error: Error) => boolean;
 }
+
+const defaultOptions: Required<RetryOptions> = {
+  maxRetries: 3,
+  delayMs: 1000,
+  backoff: 'exponential',
+  retryableErrors: [
+    /ETIMEDOUT/,
+    /ECONNRESET/,
+    /ECONNREFUSED/,
+    /EPIPE/,
+    /EAI_AGAIN/,
+    /getaddrinfo ENOTFOUND/,
+    /socket hang up/,
+    /network error/i,
+    /timeout/i,
+    /System is not ready/i,
+  ],
+  onRetry: (error: Error, attempt: number) => {
+    console.warn(`Retry attempt ${attempt} failed: ${error.message}`);
+  },
+  shouldRetry: (error: Error) => {
+    return defaultOptions.retryableErrors.some(pattern => 
+      pattern.test(error.message)
+    );
+  }
+};
 
 export interface RetryStats {
   attempts: number;
@@ -29,30 +54,12 @@ export class RetryError extends Error {
   }
 }
 
-const defaultOptions: RetryOptions = {
-  maxAttempts: 3,
-  initialDelay: 1000,
-  maxDelay: 30000,
-  backoffFactor: 2,
-  timeout: 5000,
-  retryableErrors: [
-    /ETIMEDOUT/,
-    /ECONNRESET/,
-    /ECONNREFUSED/,
-    /ENOTFOUND/,
-    /socket hang up/,
-    /network error/i,
-    /rate limit/i,
-    /timeout/i,
-    /Request failed/i
-  ]
-};
-
 export async function withRetry<T>(
-  operation: () => Promise<T>,
+  fn: () => Promise<T>, 
   options: Partial<RetryOptions> = {}
 ): Promise<T> {
-  const retryOptions: RetryOptions = { ...defaultOptions, ...options };
+  const opts = { ...defaultOptions, ...options };
+  let lastError: Error | null = null;
   const stats: RetryStats = {
     attempts: 0,
     totalTime: 0,
@@ -62,66 +69,53 @@ export async function withRetry<T>(
 
   const startTime = Date.now();
 
-  for (let attempt = 1; attempt <= retryOptions.maxAttempts; attempt++) {
-    stats.attempts = attempt;
+  for (let attempt = 0; attempt < opts.maxRetries; attempt++) {
+    stats.attempts = attempt + 1;
 
     try {
-      // Add timeout to the operation
-      const result = await Promise.race([
-        operation(),
-        new Promise<never>((_, reject) => {
-          setTimeout(() => {
-            reject(new Error(`Operation timed out after ${retryOptions.timeout}ms`));
-          }, retryOptions.timeout);
-        })
-      ]);
-
-      stats.successful = true;
-      stats.totalTime = Date.now() - startTime;
-      return result;
-
-    } catch (error) {
+      return await fn();
+    } catch (error: any) {
       const err = error instanceof Error ? error : new Error(String(error));
       stats.errors.push(err);
+      lastError = err;
 
       // Check if we should retry
-      const shouldRetry = retryOptions.shouldRetry ?
-        retryOptions.shouldRetry(err) :
-        retryOptions.retryableErrors?.some(pattern => pattern.test(err.message));
+      const shouldRetry = opts.shouldRetry ?
+        opts.shouldRetry(err) :
+        opts.retryableErrors?.some(pattern => pattern.test(err.message));
 
-      if (!shouldRetry || attempt === retryOptions.maxAttempts) {
+      if (!shouldRetry || attempt === opts.maxRetries - 1) {
         stats.finalError = err;
         stats.totalTime = Date.now() - startTime;
         throw new RetryError(
-          `Operation failed after ${attempt} attempts: ${err.message}`,
+          `Operation failed after ${attempt + 1} attempts: ${err.message}`,
           stats
         );
       }
 
-      // Calculate delay with exponential backoff and jitter
-      const delay = Math.min(
-        retryOptions.initialDelay * Math.pow(retryOptions.backoffFactor, attempt - 1),
-        retryOptions.maxDelay
-      );
-      const jitter = Math.random() * 0.1 * delay; // 10% jitter
-      const finalDelay = delay + jitter;
-
       // Call onRetry callback if provided
-      if (retryOptions.onRetry) {
-        retryOptions.onRetry(err, attempt);
+      if (opts.onRetry) {
+        opts.onRetry(err, attempt + 1);
       }
 
-      // Wait before next attempt
-      await new Promise(resolve => setTimeout(resolve, finalDelay));
+      let delay = opts.delayMs;
+      
+      if (opts.backoff === 'exponential') {
+        delay *= Math.pow(2, attempt);
+      } else if (opts.backoff === 'linear') {
+        delay *= (attempt + 1);
+      }
+      
+      await sleep(delay);
     }
   }
-
-  // This should never be reached due to the throw in the catch block
-  throw new Error('Unexpected retry loop completion');
+  
+  throw lastError || new Error('Max retries reached');
 }
 
-export function isRetryableError(error: Error): boolean {
-  return defaultOptions.retryableErrors?.some(pattern => pattern.test(error.message)) || false;
+export function isRetryableError(error: Error, options: Partial<RetryOptions> = {}): boolean {
+  const opts = { ...defaultOptions, ...options };
+  return opts.retryableErrors.some(pattern => pattern.test(error.message));
 }
 
 export async function withRetryAndFallback<T>(

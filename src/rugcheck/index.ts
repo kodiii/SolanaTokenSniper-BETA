@@ -2,9 +2,9 @@ import axios from 'axios';
 import { config } from '../config';
 import { RugResponseExtended, NewTokenRecord } from '../types';
 import { withRetry } from '../utils';
-import { TokenReport } from './types';
-import { generateRugCheckConditions } from './conditions';
-import { logTokenMetadata, logTokenRisks, logConditionResults } from './logger';
+import { TokenReport, RugCheckCondition } from './types';
+import { logTokenMetadata, logTokenRisks, RugCheckLogger } from './logger';
+import { checkRugConditions } from './conditions';
 import { insertNewToken, selectTokenByNameAndCreator } from '../database';
 
 export async function getRugCheckConfirmed(tokenMint: string): Promise<boolean> {
@@ -22,7 +22,26 @@ export async function getRugCheckConfirmed(tokenMint: string): Promise<boolean> 
         console.log(JSON.stringify(rugResponse.data, null, 2));
       }
 
-      const tokenReport = rugResponse.data as TokenReport;
+      // Convert RugResponseExtended to TokenReport with proper type safety
+      const tokenReport: TokenReport = {
+        ...rugResponse.data,
+        token: {
+          ...rugResponse.data.token,
+          isInitialized: rugResponse.data.token.isInitialized || false,
+          mintAuthority: rugResponse.data.token.mintAuthority || null,
+          freezeAuthority: rugResponse.data.token.freezeAuthority || null
+        },
+        tokenMeta: {
+          ...rugResponse.data.tokenMeta,
+          mutable: rugResponse.data.tokenMeta?.mutable || false
+        },
+        topHolders: rugResponse.data.topHolders || [],
+        markets: rugResponse.data.markets || [],
+        risks: rugResponse.data.risks || [],
+        rugged: rugResponse.data.rugged || false,
+        creator: rugResponse.data.creator || tokenMint,
+        score: rugResponse.data.score
+      };
 
       if (config.rug_check.simulation_mode) {
         console.log("\n🔬 SIMULATION MODE: No actual swaps will be made");
@@ -31,7 +50,7 @@ export async function getRugCheckConfirmed(tokenMint: string): Promise<boolean> 
       logTokenMetadata(tokenReport);
       logTokenRisks(tokenReport);
 
-      const conditions = generateRugCheckConditions(tokenReport);
+      let conditions: RugCheckCondition[] = checkRugConditions(tokenReport, new RugCheckLogger());
 
       // Check for duplicate tokens
       if (config.rug_check.block_returning_token_names || config.rug_check.block_returning_token_creators) {
@@ -42,13 +61,13 @@ export async function getRugCheckConfirmed(tokenMint: string): Promise<boolean> 
 
         if (duplicate.length !== 0) {
           if (config.rug_check.block_returning_token_names) {
-            conditions.push({
+            conditions = conditions.concat({
               check: duplicate.some((token: NewTokenRecord) => token.name === tokenReport.tokenMeta?.name),
               message: "🚫 Token with this name was already created"
             });
           }
           if (config.rug_check.block_returning_token_creators) {
-            conditions.push({
+            conditions = conditions.concat({
               check: duplicate.some((token: NewTokenRecord) => token.creator === tokenReport.creator),
               message: "🚫 Token from this creator was already created"
             });
@@ -70,7 +89,7 @@ export async function getRugCheckConfirmed(tokenMint: string): Promise<boolean> 
         }
       });
 
-      return logConditionResults(conditions);
+      return conditions.every((condition) => condition.check);
     } catch (error: unknown) {
       console.error("Error in rug check:", error instanceof Error ? error.message : String(error));
       throw error;

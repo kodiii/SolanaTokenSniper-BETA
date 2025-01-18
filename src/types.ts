@@ -98,135 +98,93 @@ export interface WebSocketRequest {
   params: Array<object>;
 }
 
-interface TransactionDetailsResponse {
-  description: string;
-  type: string;
-  source: string;
-  fee: number;
-  feePayer: string;
-  signature: string;
-  slot: number;
-  timestamp: number;
-  tokenTransfers: {
-    fromTokenAccount: string;
-    toTokenAccount: string;
-    fromUserAccount: string;
-    toUserAccount: string;
-    tokenAmount: number | string;
-    mint: string;
-    tokenStandard: string;
-  }[];
-  nativeTransfers: {
-    fromUserAccount: string;
-    toUserAccount: string;
-    amount: number;
-  }[];
-  accountData: {
-    account: string;
-    nativeBalanceChange: number;
-    tokenBalanceChanges: {
-      userAccount: string;
-      tokenAccount: string;
-      rawTokenAmount: {
-        tokenAmount: string;
-        decimals: number;
-      };
-      mint: string;
-    }[];
-  }[];
-  transactionError: string | null;
-  instructions: {
-    accounts: string[];
-    data: string;
-    programId: string;
-    innerInstructions: {
-      accounts: string[];
-      data: string;
-      programId: string;
-    }[];
-  }[];
-  events: {
-    swap: {
-      nativeInput: {
-        account: string;
-        amount: string;
-      } | null;
-      nativeOutput: {
-        account: string;
-        amount: string;
-      } | null;
-      tokenInputs: {
-        userAccount: string;
-        tokenAccount: string;
-        rawTokenAmount: {
-          tokenAmount: string;
-          decimals: number;
+interface TransactionBase {
+  description?: string;
+  type?: string;
+  source?: string;
+  fee?: number;
+  feePayer?: string;
+  signature?: string;
+  slot?: number;
+  timestamp?: number;
+  transactionError?: string | null;
+}
+
+interface TransactionLegacy extends TransactionBase {
+  version: 'legacy';
+  transaction: {
+    message: {
+      instructions: Array<{
+        parsed?: {
+          type: string;
+          info: Record<string, any>;
         };
-        mint: string;
-      }[];
-      tokenOutputs: {
-        userAccount: string;
-        tokenAccount: string;
-        rawTokenAmount: {
-          tokenAmount: string;
-          decimals: number;
-        };
-        mint: string;
-      }[];
-      nativeFees: {
-        account: string;
-        amount: string;
-      }[];
-      tokenFees: {
-        userAccount: string;
-        tokenAccount: string;
-        rawTokenAmount: {
-          tokenAmount: string;
-          decimals: number;
-        };
-        mint: string;
-      }[];
-      innerSwaps: {
-        tokenInputs: {
-          fromTokenAccount: string;
-          toTokenAccount: string;
-          fromUserAccount: string;
-          toUserAccount: string;
-          tokenAmount: number;
-          mint: string;
-          tokenStandard: string;
-        }[];
-        tokenOutputs: {
-          fromTokenAccount: string;
-          toTokenAccount: string;
-          fromUserAccount: string;
-          toUserAccount: string;
-          tokenAmount: number;
-          mint: string;
-          tokenStandard: string;
-        }[];
-        tokenFees: {
-          userAccount: string;
-          tokenAccount: string;
-          rawTokenAmount: {
-            tokenAmount: string;
-            decimals: number;
-          };
-          mint: string;
-        }[];
-        nativeFees: {
-          account: string;
-          amount: string;
-        }[];
-        programInfo: {
-          source: string;
-          account: string;
-          programName: string;
-          instructionName: string;
-        };
-      }[];
+        programId: string;
+        accounts?: string[];
+        data?: string;
+      }>;
     };
   };
+  meta?: {
+    innerInstructions?: Array<{
+      instructions: Array<{
+        parsed?: {
+          type: string;
+          info: Record<string, any>;
+        };
+        programId: string;
+        accounts?: string[];
+        data?: string;
+      }>;
+    }>;
+  };
+}
+
+interface TransactionVersioned extends TransactionBase {
+  version: number;
+  transaction: {
+    message: {
+      instructions: Array<{
+        parsed?: {
+          type: string;
+          info: Record<string, any>;
+        };
+        programId: string;
+        accounts?: string[];
+        data?: string;
+      }>;
+    };
+  };
+  meta?: {
+    innerInstructions?: Array<{
+      instructions: Array<{
+        parsed?: {
+          type: string;
+          info: Record<string, any>;
+        };
+        programId: string;
+        accounts?: string[];
+        data?: string;
+      }>;
+    }>;
+  };
+}
+
+type TransactionDetailsResponse = TransactionLegacy | TransactionVersioned;
+
+// Type guard functions
+function isTransactionLegacy(tx: any): tx is TransactionLegacy {
+  return tx?.version === 'legacy' &&
+         tx?.transaction?.message?.instructions !== undefined;
+}
+
+function isTransactionVersioned(tx: any): tx is TransactionVersioned {
+  return typeof tx?.version === 'number' &&
+         tx?.transaction?.message?.instructions !== undefined;
+}
+
+function isTransactionDetailsResponse(tx: any): tx is TransactionDetailsResponse {
+  return isTransactionLegacy(tx) || isTransactionVersioned(tx);
 }
 
 export interface SwapEventDetailsResponse {
@@ -282,9 +240,19 @@ export interface NewTokenRecord {
   mint: string;
   creator: string;
 }
-<<<<<<< Updated upstream
-// Update to reflect an array of transactions
-=======
+
+export interface MarketData {
+  price: number;
+  liquidity: number;
+  volume24h: number;
+  priceChange24h: number;
+}
+
+export interface SellTransactionLock {
+  timestamp: number;
+  cooling_period: number;
+  min_holding_time: number;
+}
 
 export interface createSellTransactionResponse {
   success: boolean;
@@ -297,21 +265,6 @@ export interface SellTransactionLock {
   lockedAt: number;
   expiresAt: number;
   attempts: number;
-}
-
-export interface SellTransactionLock {
-  token: string;
-  lockedAt: number;
-  expiresAt: number;
-  attempts: number;
-}
-
-export interface MarketData {
-  price: number;
-  liquidity: number;
-  priceImpact: number;
-  lastUpdated: number;
-  source: 'jup' | 'dex';
 }
 
 export interface SellAttempt {
@@ -388,5 +341,4 @@ export interface LastPriceDexReponse {
   }[];
 }
 
->>>>>>> Stashed changes
 export type TransactionDetailsResponseArray = TransactionDetailsResponse[];
