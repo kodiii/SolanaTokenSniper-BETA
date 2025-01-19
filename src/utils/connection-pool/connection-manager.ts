@@ -4,6 +4,8 @@ import { PooledConnection, PoolConfig } from './types';
 import { HealthChecker } from './health-checker';
 import { ErrorClassifier } from '../error-classifier';
 import { config } from '../../config';
+import { Agent as HttpAgent } from 'http';
+import { Agent as HttpsAgent } from 'https';
 
 export class ConnectionManager {
   private healthChecker: HealthChecker;
@@ -26,15 +28,54 @@ export class ConnectionManager {
   }
 
   async createConnection(endpoint: string, opts?: ConnectionConfig): Promise<PooledConnection> {
+    // Use Helius endpoint if available, otherwise fallback to provided endpoint
+    const primaryEndpoint = process.env.HELIUS_HTTPS_URI || endpoint;
+    
     const connectionConfig: ConnectionConfig = {
       commitment: 'confirmed',
       confirmTransactionInitialTimeout: config.rpc.connection_timeout,
+      httpAgent: primaryEndpoint.
+      startsWith('https://')
+        ? new HttpsAgent({
+            keepAlive: true,
+            keepAliveMsecs: 5000,
+            timeout: 5000
+          })
+        : new HttpAgent({
+            keepAlive: true,
+            keepAliveMsecs: 5000,
+            timeout: 5000
+          }),
+      fetch: async (input: string | URL | Request, init?: RequestInit) => {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
+        
+        try {
+          const response = await fetch(input, {
+            ...init,
+            signal: controller.signal
+          } as RequestInit);
+          
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+          
+          return response;
+        } catch (error) {
+          if (error instanceof Error && error.name === 'AbortError') {
+            throw new Error('Request timed out');
+          }
+          throw error;
+        } finally {
+          clearTimeout(timeout);
+        }
+      },
       ...opts
     };
 
-    const connection = new Connection(endpoint, connectionConfig);
+    const connection = new Connection(primaryEndpoint, connectionConfig);
     try {
-      await this.healthChecker.validateConnection(connection, endpoint);
+      await this.healthChecker.validateConnection(connection, primaryEndpoint);
     } catch (error) {
       const errorObj = error instanceof Error ? error : new Error(String(error));
       const classifiedError = this.errorClassifier.classifyError(

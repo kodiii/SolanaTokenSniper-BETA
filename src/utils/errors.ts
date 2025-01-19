@@ -80,6 +80,13 @@ export class ErrorClassifier {
     /socket hang up/
   ];
 
+  private static readonly VALIDATION_ERROR_PATTERNS = [
+    /Expected the value to satisfy a union of `type \| type`/,
+    /validation failed/i,
+    /invalid type/i,
+    /struct error/i
+  ];
+
   private static readonly RATE_LIMIT_PATTERNS = [
     /rate limit/i,
     /too many requests/i,
@@ -210,10 +217,16 @@ export class ErrorClassifier {
       category = ErrorCategory.TIMEOUT;
       severity = ErrorSeverity.MEDIUM;
       retryable = true;
-    } else if (/validation/i.test(error.message)) {
+    } else if (this.VALIDATION_ERROR_PATTERNS.some(pattern => pattern.test(error.message))) {
       category = ErrorCategory.VALIDATION;
       severity = ErrorSeverity.MEDIUM;
       retryable = false;
+      // Add validation details to metadata
+      metadata.details = {
+        ...metadata.details,
+        validationError: error.message,
+        stack: error.stack
+      };
     }
 
     return new ClassifiedError(
