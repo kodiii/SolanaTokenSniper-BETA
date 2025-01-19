@@ -87,3 +87,16 @@ export interface PriceAggregationConfig {
   reliabilityWindow: number;   // Time window for calculating reliability scores
   outlierThreshold: number;    // Standard deviations for outlier detection
 }
+
+export interface PriceSource {
+  name: string;
+  price: number | null;
+  timestamp: number;
+  confidence: number;
+}
+
+export interface PriceValidationResult {
+  isValid: boolean;
+  reason?: string;
+  adjustedPrice?: number;
+}

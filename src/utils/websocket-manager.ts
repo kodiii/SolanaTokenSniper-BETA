@@ -30,7 +30,7 @@ export class WebSocketManager extends EventEmitter {
   private constructor() {
     super();
     this.logger = Logger.getInstance();
-    this.connectionPool = ConnectionPool.getInstance();
+    this.connectionPool = ConnectionPool.getInstance(this.logger);
     this.config = {
       maxReconnectAttempts: config.websocket?.max_reconnect_attempts || 5,
       reconnectDelay: config.websocket?.reconnect_delay || 1000,
@@ -48,44 +48,46 @@ export class WebSocketManager extends EventEmitter {
   }
 
   private async setupWebSocket() {
-    await this.connectionPool.withConnection(async (connection: Connection) => {
-      try {
-        // Start ping/pong heartbeat
-        this.startHeartbeat();
+    const connection = await this.connectionPool.getConnection();
+    try {
+      // Start ping/pong heartbeat
+      this.startHeartbeat();
 
-        // Subscribe to slot updates for network status
-        this.subscribeToSlotUpdates();
+      // Subscribe to slot updates for network status
+      this.subscribeToSlotUpdates();
 
-        this.logger.info('WebSocket connection established');
-        this.reconnectAttempts = 0;
-        this.isReconnecting = false;
-      } catch (error) {
-        const classifiedError = ErrorClassifier.classifyError(error, 'WebSocketManager', 'setupWebSocket');
-        this.logger.error('Failed to setup WebSocket connection', classifiedError);
-        this.handleConnectionError();
-      }
-    });
+      this.logger.info('WebSocket connection established');
+      this.reconnectAttempts = 0;
+      this.isReconnecting = false;
+    } catch (error) {
+      const classifiedError = ErrorClassifier.classifyError(error, 'WebSocketManager', 'setupWebSocket');
+      this.logger.error('Failed to setup WebSocket connection', classifiedError);
+      this.handleConnectionError();
+    } finally {
+      this.connectionPool.releaseConnection(connection);
+    }
   }
 
   private startHeartbeat() {
-    const pingInterval = setInterval(() => {
+    const pingInterval = setInterval(async () => {
       if (!this.isReconnecting) {
-        this.connectionPool.withConnection(async (connection: Connection) => {
-          try {
-            const pongTimeout = setTimeout(() => {
-              this.logger.warn('WebSocket pong timeout');
-              this.handleConnectionError();
-            }, this.config.pongTimeout);
-
-            // Get slot as ping
-            await connection.getSlot();
-            clearTimeout(pongTimeout);
-          } catch (error) {
-            const classifiedError = ErrorClassifier.classifyError(error, 'WebSocketManager', 'startHeartbeat');
-            this.logger.error('WebSocket heartbeat failed', classifiedError);
+        const connection = await this.connectionPool.getConnection();
+        try {
+          const pongTimeout = setTimeout(() => {
+            this.logger.warn('WebSocket pong timeout');
             this.handleConnectionError();
-          }
-        });
+          }, this.config.pongTimeout);
+
+          // Get slot as ping
+          await connection.getSlot();
+          clearTimeout(pongTimeout);
+        } catch (error) {
+          const classifiedError = ErrorClassifier.classifyError(error, 'WebSocketManager', 'startHeartbeat');
+          this.logger.error('WebSocket heartbeat failed', classifiedError);
+          this.handleConnectionError();
+        } finally {
+          this.connectionPool.releaseConnection(connection);
+        }
       }
     }, this.config.pingInterval);
 
@@ -141,105 +143,109 @@ export class WebSocketManager extends EventEmitter {
   }
 
   public async subscribeToAccountUpdates(accountPublicKey: PublicKey, callback: (accountInfo: any) => void): Promise<string> {
-    return await this.connectionPool.withConnection(async (connection: Connection) => {
-      try {
-        const subscriptionId = connection.onAccountChange(
-          accountPublicKey,
-          (accountInfo) => {
-            callback(accountInfo);
-          },
-          'confirmed'
-        );
+    const connection = await this.connectionPool.getConnection();
+    try {
+      const subscriptionId = connection.onAccountChange(
+        accountPublicKey,
+        (accountInfo) => {
+          callback(accountInfo);
+        },
+        'confirmed'
+      );
 
-        const key = `account:${accountPublicKey.toBase58()}`;
-        this.subscriptions.set(key, {
-          id: subscriptionId,
-          type: 'account',
-          unsubscribe: () => connection.removeAccountChangeListener(subscriptionId)
-        });
+      const key = `account:${accountPublicKey.toBase58()}`;
+      this.subscriptions.set(key, {
+        id: subscriptionId,
+        type: 'account',
+        unsubscribe: () => connection.removeAccountChangeListener(subscriptionId)
+      });
 
-        return key;
-      } catch (error) {
-        const classifiedError = ErrorClassifier.classifyError(error, 'WebSocketManager', 'subscribeToAccountUpdates');
-        this.logger.error('Failed to subscribe to account updates', classifiedError);
-        throw error;
-      }
-    });
+      return key;
+    } catch (error) {
+      const classifiedError = ErrorClassifier.classifyError(error, 'WebSocketManager', 'subscribeToAccountUpdates');
+      this.logger.error('Failed to subscribe to account updates', classifiedError);
+      throw error;
+    } finally {
+      this.connectionPool.releaseConnection(connection);
+    }
   }
 
   public async subscribeToProgramLogs(programId: PublicKey, callback: (logs: string[]) => void): Promise<string> {
-    return await this.connectionPool.withConnection(async (connection: Connection) => {
-      try {
-        const subscriptionId = connection.onLogs(
-          programId,
-          (logs) => {
-            callback(logs.logs);
-          },
-          'confirmed'
-        );
+    const connection = await this.connectionPool.getConnection();
+    try {
+      const subscriptionId = connection.onLogs(
+        programId,
+        (logs) => {
+          callback(logs.logs);
+        },
+        'confirmed'
+      );
 
-        const key = `program:${programId.toBase58()}`;
-        this.subscriptions.set(key, {
-          id: subscriptionId,
-          type: 'program',
-          unsubscribe: () => connection.removeOnLogsListener(subscriptionId)
-        });
+      const key = `program:${programId.toBase58()}`;
+      this.subscriptions.set(key, {
+        id: subscriptionId,
+        type: 'program',
+        unsubscribe: () => connection.removeOnLogsListener(subscriptionId)
+      });
 
-        return key;
-      } catch (error) {
-        const classifiedError = ErrorClassifier.classifyError(error, 'WebSocketManager', 'subscribeToProgramLogs');
-        this.logger.error('Failed to subscribe to program logs', classifiedError);
-        throw error;
-      }
-    });
+      return key;
+    } catch (error) {
+      const classifiedError = ErrorClassifier.classifyError(error, 'WebSocketManager', 'subscribeToProgramLogs');
+      this.logger.error('Failed to subscribe to program logs', classifiedError);
+      throw error;
+    } finally {
+      this.connectionPool.releaseConnection(connection);
+    }
   }
 
   private async subscribeToSlotUpdates() {
-    await this.connectionPool.withConnection(async (connection: Connection) => {
-      try {
-        const subscriptionId = connection.onSlotChange((slotInfo) => {
-          this.emit('slot_update', slotInfo);
-        });
+    const connection = await this.connectionPool.getConnection();
+    try {
+      const subscriptionId = connection.onSlotChange((slotInfo) => {
+        this.emit('slot_update', slotInfo);
+      });
 
-        const key = 'slot:updates';
-        this.subscriptions.set(key, {
-          id: subscriptionId,
-          type: 'slot',
-          unsubscribe: () => connection.removeSlotChangeListener(subscriptionId)
-        });
-      } catch (error) {
-        await this.handleWebSocketError(error, 'subscribeToSlotUpdates');
-      }
-    });
+      const key = 'slot:updates';
+      this.subscriptions.set(key, {
+        id: subscriptionId,
+        type: 'slot',
+        unsubscribe: () => connection.removeSlotChangeListener(subscriptionId)
+      });
+    } catch (error) {
+      await this.handleWebSocketError(error, 'subscribeToSlotUpdates');
+    } finally {
+      this.connectionPool.releaseConnection(connection);
+    }
   }
 
   public async subscribeToSignatureStatus(signature: string, callback: (status: any) => void): Promise<string> {
-    return await this.connectionPool.withConnection(async (connection: Connection) => {
-      try {
-        const subscriptionId = connection.onSignature(
-          signature,
-          (status) => {
-            callback(status);
-            // Auto-unsubscribe after receiving the status
-            this.unsubscribe(`signature:${signature}`);
-          },
-          'confirmed'
-        );
+    const connection = await this.connectionPool.getConnection();
+    try {
+      const subscriptionId = connection.onSignature(
+        signature,
+        (status) => {
+          callback(status);
+          // Auto-unsubscribe after receiving the status
+          this.unsubscribe(`signature:${signature}`);
+        },
+        'confirmed'
+      );
 
-        const key = `signature:${signature}`;
-        this.subscriptions.set(key, {
-          id: subscriptionId,
-          type: 'signature',
-          unsubscribe: () => connection.removeSignatureListener(subscriptionId)
-        });
+      const key = `signature:${signature}`;
+      this.subscriptions.set(key, {
+        id: subscriptionId,
+        type: 'signature',
+        unsubscribe: () => connection.removeSignatureListener(subscriptionId)
+      });
 
-        return key;
-      } catch (error) {
-        const classifiedError = ErrorClassifier.classifyError(error, 'WebSocketManager', 'subscribeToSignatureStatus');
-        this.logger.error('Failed to subscribe to signature status', classifiedError);
-        throw error;
-      }
-    });
+      return key;
+    } catch (error) {
+      const classifiedError = ErrorClassifier.classifyError(error, 'WebSocketManager', 'subscribeToSignatureStatus');
+      this.logger.error('Failed to subscribe to signature status', classifiedError);
+      throw error;
+    } finally {
+      this.connectionPool.releaseConnection(connection);
+    }
   }
 
   public async unsubscribe(subscriptionKey: string): Promise<void> {

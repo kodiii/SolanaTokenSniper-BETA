@@ -2,7 +2,33 @@ import WebSocket from "ws"; // Node.js websocket library
 import dotenv from "dotenv"; // zero-dependency module that loads environment variables from a .env
 import { WebSocketRequest } from "./types"; // Typescript Types for type safety
 import { config } from "./config"; // Configuration parameters for our bot
-import { fetchTransactionDetails, createSwapTransaction, getRugCheckConfirmed, fetchAndSaveSwapDetails } from "./transactions";
+import { Connection, Keypair, Transaction, VersionedTransaction } from '@solana/web3.js';
+import bs58 from 'bs58';
+import { walletAdapterIdentity } from '@metaplex-foundation/js';
+import { createSellTransaction, getRugCheckConfirmed } from "./transactions";
+import { TransactionDetails } from "./transactions/transaction-details";
+
+// Initialize connection with a valid endpoint
+const endpoint = config.rpc.endpoints.find(e => e) || "https://api.mainnet-beta.solana.com";
+const connection = new Connection(endpoint, {
+  commitment: 'confirmed',
+  confirmTransactionInitialTimeout: config.rpc.connection_timeout
+});
+
+// Initialize wallet
+const keypair = Keypair.generate();
+const wallet = {
+  publicKey: keypair.publicKey,
+  payer: keypair,
+  signTransaction: async (transaction: Transaction) => {
+    transaction.sign(keypair);
+    return transaction;
+  },
+  signAllTransactions: async (transactions: Transaction[]) => {
+    transactions.forEach(t => t.sign(keypair));
+    return transactions;
+  }
+};
 
 // Load environment variables from the .env file
 dotenv.config();
@@ -39,10 +65,10 @@ function sendUnsubscribeRequest(ws: WebSocket): void {
 }
 
 // Function used to handle the transaction once a new pool creation is found
-async function processTransaction(signature: string): Promise<void> {
+async function processTransaction(incomingSignature: string): Promise<void> {
   if (activeTransactions >= MAX_CONCURRENT) {
     console.log("⏳ Max concurrent transactions reached, queuing...");
-    pendingTransactions.push(signature);
+    pendingTransactions.push(incomingSignature);
     return;
   }
 
@@ -55,7 +81,7 @@ async function processTransaction(signature: string): Promise<void> {
     console.log("🔃 Fetching transaction details ...");
 
     // Fetch the transaction details
-    const data = await fetchTransactionDetails(signature);
+    const data = await TransactionDetails.fetchTransactionDetails(connection, incomingSignature);
     if (!data) {
       console.log("⛔ Transaction aborted. No data returned.");
       console.log("🟢 Resuming looking for new tokens...\n");
@@ -96,7 +122,7 @@ async function processTransaction(signature: string): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, config.tx.swap_tx_initial_delay));
 
     // Create Swap transaction
-    const tx = await createSwapTransaction(data.solMint, data.tokenMint);
+    const tx = await createSellTransaction(wallet, data.solMint, config.swap.amount);
     if (!tx) {
       console.log("⛔ Transaction aborted. No valid id returned.");
       console.log("🟢 Resuming looking for new tokens...\n");
@@ -109,10 +135,8 @@ async function processTransaction(signature: string): Promise<void> {
     console.log("Swap Transaction: ", "https://solscan.io/tx/" + tx);
 
     // Fetch and store the transaction for tracking purposes
-    const saveConfirmation = await fetchAndSaveSwapDetails(tx);
-    if (!saveConfirmation) {
-      console.log("❌ Warning: Transaction not saved for tracking! Track Manually!");
-    }
+    const signature = bs58.encode(tx.signatures[0]);
+    await TransactionDetails.fetchAndSaveSwapDetails(connection, signature);
   } catch (error) {
     console.error("Error processing transaction:", error);
   } finally {

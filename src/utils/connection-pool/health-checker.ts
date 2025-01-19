@@ -21,13 +21,13 @@ export class HealthChecker {
       return true;
     } catch (error) {
       this.updateConnectionMetrics(conn, 0, false);
-      const classifiedError = this.errorClassifier.classifyError(
+      const classifiedError = ErrorClassifier.classifyError(
         error,
         'HealthChecker',
         'checkConnectionHealth',
         { endpoint: conn.endpoint }
       );
-      this.logger.error(`Health check failed for endpoint ${conn.endpoint}`, { error: classifiedError });
+      this.logger.error('Health check failed', classifiedError);
       return false;
     }
   }
@@ -48,7 +48,7 @@ export class HealthChecker {
     try {
       await connection.getSlot();
     } catch (error) {
-      const classifiedError = this.errorClassifier.classifyError(
+      const classifiedError = ErrorClassifier.classifyError(
         error,
         'HealthChecker',
         'validateConnection',

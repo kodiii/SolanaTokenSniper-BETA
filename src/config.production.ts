@@ -1,4 +1,5 @@
 import { config as baseConfig } from './config';
+import { RugCheckConfig } from './rugcheck/types';
 
 const productionConfig: Partial<typeof baseConfig> = {
   performance: {
@@ -61,6 +62,7 @@ const productionConfig: Partial<typeof baseConfig> = {
     contain_string: [],
     allow_insider_topholders: false,
     max_alowed_pct_topholders: 10,
+    max_alowed_pct_all_topholders: 50,
     exclude_lp_from_topholders: true,
     min_total_markets: 1,
     min_total_lp_providers: 2,
@@ -69,7 +71,7 @@ const productionConfig: Partial<typeof baseConfig> = {
     max_score: 100,
     min_score: 50,
     legacy_not_allowed: ["DEPRECATED", "OLD"]
-  },
+  } as RugCheckConfig,
   trading: {
     stopLoss: {
       enabled: true,

@@ -2,10 +2,13 @@ import { Connection, ConnectionConfig } from '@solana/web3.js';
 import { Logger } from '../logger';
 import { PooledConnection, PoolConfig } from './types';
 import { HealthChecker } from './health-checker';
+import { ErrorClassifier } from '../error-classifier';
 import { config } from '../../config';
 
 export class ConnectionManager {
   private healthChecker: HealthChecker;
+
+  private readonly errorClassifier: ErrorClassifier;
 
   constructor(
     private readonly logger: Logger,
@@ -19,6 +22,7 @@ export class ConnectionManager {
     }
   ) {
     this.healthChecker = new HealthChecker(logger);
+    this.errorClassifier = ErrorClassifier.getInstance();
   }
 
   async createConnection(endpoint: string, opts?: ConnectionConfig): Promise<PooledConnection> {
@@ -29,7 +33,19 @@ export class ConnectionManager {
     };
 
     const connection = new Connection(endpoint, connectionConfig);
-    await this.healthChecker.validateConnection(connection, endpoint);
+    try {
+      await this.healthChecker.validateConnection(connection, endpoint);
+    } catch (error) {
+      const errorObj = error instanceof Error ? error : new Error(String(error));
+      const classifiedError = this.errorClassifier.classifyError(
+        errorObj,
+        'ConnectionManager',
+        'createConnection',
+        { endpoint }
+      );
+      this.logger.error('Failed to create connection', classifiedError);
+      throw error;
+    }
 
     return {
       connection,
@@ -60,7 +76,14 @@ export class ConnectionManager {
       this.logger.info(`Refreshed connection to ${conn.endpoint}`);
       return newConn;
     } catch (error) {
-      this.logger.error(`Failed to refresh connection to ${conn.endpoint}`, { error });
+      const errorObj = error instanceof Error ? error : new Error(String(error));
+      const classifiedError = this.errorClassifier.classifyError(
+        errorObj,
+        'ConnectionManager',
+        'refreshConnection',
+        { endpoint: conn.endpoint }
+      );
+      this.logger.error(`Failed to refresh connection to ${conn.endpoint}`, classifiedError);
       throw error;
     }
   }

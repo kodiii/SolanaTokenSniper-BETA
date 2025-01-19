@@ -1,3 +1,5 @@
+import { RugCheckConfig } from './rugcheck/types';
+
 export const config = {
   performance: {
     max_concurrent_operations: 5, // Maximum number of concurrent operations
@@ -64,20 +66,23 @@ export const config = {
     wsol_pc_mint: "So11111111111111111111111111111111111111112",
   },
   tx: {
+    max_retries: 3,              // Maximum number of retry attempts
+    retry_delay: 1000,           // Base delay between retries in ms
+    confirmation_timeout: 30000,  // Max time to wait for confirmation in ms
+    priority_fee: 10000,         // Priority fee in lamports
     fetch_tx_max_retries: 5,
     fetch_tx_initial_delay: 1000, // Initial delay before fetching LP creation transaction details (3 seconds)
     swap_tx_initial_delay: 500, // Initial delay before first buy (1 second)
     get_timeout: 10000, // Timeout for API requests
     concurrent_transactions: 1, // Number of simultaneous transactions
-    retry_delay: 500, // Delay between retries (0.5 seconds)
   },
   swap: {
     verbose_log: false,
     dynamic_fees: false, // Toggle between dynamic and static fees
     prio_fee_max_lamports: 1000000, // 0.001 SOL
     prio_level: "medium", // If you want to land transaction fast, set this to use `veryHigh`. You will pay on average higher priority fee.
-    amount: "150000000", //0.015 SOL
-    slippageBps: "200", // 2%
+    amount: 150000000, //0.015 SOL
+    slippageBps: 200, // 2%
     db_name_tracker_holdings: "src/tracker/holdings.db", // Sqlite Database location
     token_not_tradable_400_error_retries: 5, // How many times should the bot try to get a quote if the token is not tradable yet
     token_not_tradable_400_error_delay: 2000, // How many seconds should the bot wait before retrying to get a quote again
@@ -86,7 +91,7 @@ export const config = {
     dynamic_fees: false, // Toggle between dynamic and static fees
     prio_fee_max_lamports: 1000000, // 0.001 SOL
     prio_level: "high", // If you want to land transaction fast, set this to use `veryHigh`. You will pay on average higher priority fee.
-    slippageBps: "200", // 2%
+    slippageBps: 200, // 2%
     auto_sell: true, // If set to true, stop loss and take profit triggers automatically when set.
     stop_loss_percent: 20, // Changed from 20 to 8 for better risk management
     take_profit_percent: 25, // Changed from 250 to 80 for more realistic profit targets
@@ -112,9 +117,9 @@ export const config = {
     block_returning_token_creators: true,
     exclude_lp_from_topholders: true,
     only_contain_string: false,
-    contain_string: [],
-    block_symbols: [],
-    block_names: [],
+    contain_string: [] as string[],
+    block_symbols: [] as string[],
+    block_names: [] as string[],
     max_alowed_pct_topholders: 20,
     max_alowed_pct_all_topholders: 50,
     min_total_lp_providers: 5,
@@ -123,7 +128,7 @@ export const config = {
     max_score: 50,
     min_score: 0,
     legacy_not_allowed: ["Honeypot Risk", "Mint Authority", "Freeze Authority"]
-  },
+  } as RugCheckConfig,
   retry: {
     default: {
       maxAttempts: 3,
@@ -173,7 +178,16 @@ export const config = {
         uri: process.env.DEX_HTTPS_LATEST_TOKENS,
         timeout: 3000
       }
-    }
+    },
+    validation: {
+      max_source_deviation: 0.1,    // Maximum allowed deviation between sources (10%)
+      max_price_change: 0.2,        // Maximum allowed sudden price change (20%)
+      max_price_age: 60000,         // Maximum age of price data in milliseconds (1 minute)
+      max_history_items: 100,       // Number of historical prices to keep per token
+      min_confidence: 0.7,          // Minimum required confidence score
+      outlier_threshold: 2,         // Standard deviations for outlier detection
+      stale_price_threshold: 30000  // Consider price stale after 30 seconds
+    },
   },
   trading: {
     stopLoss: {

@@ -5,6 +5,7 @@ import { withRetry, withRetryAndFallback, RetryError } from '../utils/retry';
 import { ErrorClassifier, ClassifiedError, ErrorCategory, ErrorSeverity } from '../utils/errors';
 import { Logger, LogLevel } from '../utils/logger';
 import { PriceCircuitManager } from './price-circuit-breaker';
+import { PriceValidator } from './price-validator';
 
 export class PriceAggregator {
   private static instance: PriceAggregator;
@@ -12,12 +13,14 @@ export class PriceAggregator {
   private readonly aggregationConfig: PriceAggregationConfig;
   private readonly logger: Logger;
   private readonly circuitManager: PriceCircuitManager;
+  private readonly priceValidator: PriceValidator;
 
   private constructor() {
     this.sources = new Map();
     this.aggregationConfig = config.price.aggregation;
     this.logger = Logger.getInstance();
     this.circuitManager = PriceCircuitManager.getInstance();
+    this.priceValidator = PriceValidator.getInstance();
     this.initializeSources();
   }
 
@@ -130,6 +133,7 @@ export class PriceAggregator {
     } catch (error) {
       const responseTime = Date.now() - startTime;
       const classifiedError = ErrorClassifier.classifyError(error, source, 'fetchPrice', {
+        timestamp: Date.now(),
         token,
         responseTime,
         retryStats: error instanceof RetryError ? error.stats : undefined
@@ -385,80 +389,71 @@ export class PriceAggregator {
   }
 
   public async getAggregatedPrice(token: string): Promise<PriceData | null> {
-    const prices = new Map<string, number>();
-    const sourceTimes = new Map<string, number>();
-    const startTime = Date.now();
+    try {
+      const prices = await Promise.all([
+        this.fetchJupiterPrice(token),
+        this.fetchDexScreenerPrice(token)
+      ]);
 
-    // Only use enabled sources
-    const enabledSources = Array.from(this.sources.values())
-      .filter(source => source.enabled)
-      .sort((a, b) => a.priority - b.priority);
-
-    // Fetch prices from enabled sources in parallel
-    const results = await Promise.all(
-      enabledSources.map(async (source) => {
-        try {
-          const price = source.name === 'jupiter' ?
-            await this.fetchJupiterPrice(token) :
-            await this.fetchDexScreenerPrice(token);
-          return { source: source.name, price };
-        } catch (error) {
-          return { source: source.name, price: null };
+      const priceSources = [
+        {
+          name: 'jupiter',
+          price: prices[0],
+          timestamp: Date.now(),
+          confidence: this.sources.get('jupiter')?.reliabilityScore || 0.5
+        },
+        {
+          name: 'dexscreener',
+          price: prices[1],
+          timestamp: Date.now(),
+          confidence: this.sources.get('dexscreener')?.reliabilityScore || 0.5
         }
-      })
-    );
+      ];
 
-    // Process results
-    results.forEach(({ source, price }) => {
-      if (price !== null) {
-        prices.set(source, price);
-        sourceTimes.set(source, Date.now() - startTime);
-      }
-    });
+      const validationResult = await this.priceValidator.validatePrice(token, priceSources);
 
-    if (prices.size < this.aggregationConfig.minSources) {
-      return null;
-    }
-
-    // Calculate weighted average price
-    let weightedSum = 0;
-    let weightSum = 0;
-    const sourceData: { [source: string]: any } = {};
-
-    prices.forEach((price, sourceName) => {
-      const sourceConfig = this.sources.get(sourceName)!;
-      if (!this.isOutlier(price, Array.from(prices.values()))) {
-        weightedSum += price * sourceConfig.weight;
-        weightSum += sourceConfig.weight;
+      if (!validationResult.isValid) {
+        await this.logger.warn('Price validation failed', {
+          token,
+          reason: validationResult.reason
+        });
+        return null;
       }
 
-      sourceData[sourceName] = {
-        price,
+      return {
+        price: validationResult.adjustedPrice!,
         timestamp: Date.now(),
-        weight: sourceConfig.weight,
-        latency: sourceTimes.get(sourceName) || 0,
-        success: true
+        source: 'aggregated',
+        confidence: Math.max(...priceSources.map(s => s.confidence)),
+        sourceData: priceSources.reduce((acc, source) => {
+          acc[source.name] = {
+            price: source.price!,
+            timestamp: source.timestamp,
+            weight: this.sources.get(source.name)?.weight || 1,
+            latency: 0,
+            success: source.price !== null
+          };
+          return acc;
+        }, {} as { [key: string]: any })
       };
-    });
-
-    if (weightSum === 0) {
+    } catch (error) {
+      const classifiedError = ErrorClassifier.classifyError(
+        error as Error,
+        'aggregator',
+        'getAggregatedPrice',
+        { 
+          token,
+          timestamp: Date.now(),
+          sources: Array.from(this.sources.keys()).join(',')
+        }
+      );
+      await this.logger.error(
+        'Failed to get aggregated price',
+        classifiedError,
+        { token, sources: Array.from(this.sources.keys()) }
+      );
       return null;
     }
-
-    const aggregatedPrice = weightedSum / weightSum;
-    const confidence = this.calculateConfidence(prices);
-
-    if (confidence < this.aggregationConfig.confidenceThreshold) {
-      return null;
-    }
-
-    return {
-      price: aggregatedPrice,
-      timestamp: Date.now(),
-      source: 'aggregated',
-      confidence,
-      sourceData
-    };
   }
 
   public getSourceStats(): Map<string, PriceSourceConfig> {

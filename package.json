@@ -34,6 +34,7 @@
     "typescript-eslint": "^8.16.0"
   },
   "dependencies": {
+    "@metaplex-foundation/js": "^0.19.0",
     "@project-serum/anchor": "^0.26.0",
     "@solana/spl-token": "^0.4.9",
     "@solana/web3.js": "^1.91.0",
